@@ -13,8 +13,8 @@ class NormalQAgent(Agent):
         assert self.evaluationFunction != None
         self.prev_state = None
         self.prev_action = None
-        if os.path.exists('Q.pkl'):
-            with open('Q.pkl', 'rb') as f:
+        if os.path.exists('NormalQ.pkl'):
+            with open('NormalQ.pkl', 'rb') as f:
                 self.Q = pickle.load(f)
             print('Lasted Q has been loaded.')
         else:
@@ -29,7 +29,7 @@ class NormalQAgent(Agent):
         self.hundred_mean = []
 
     def sigint_handler(self):
-        with open('Q.pkl', 'wb') as f:
+        with open('NormalQ.pkl', 'wb') as f:
             pickle.dump(self.Q, f)
         import sys
         sys.exit(0)

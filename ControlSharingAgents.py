@@ -8,9 +8,10 @@ import os
 import pickle
 
 TEACHER_Q_PATH = 'NormalQ.pkl'
-STUDENT_Q_PATH = 'agentQAB.pkl'
+STUDENT_Q_PATH = 'agentQCS.pkl'
 
-class ABAgent(Agent):
+class CSAgent(Agent):
+
     def __init__(self, evalFn="scoreEvaluation", **args):
         self.evaluationFunction = util.lookup(evalFn, globals())
         assert self.evaluationFunction != None
@@ -18,13 +19,12 @@ class ABAgent(Agent):
         self.prev_action = None
         self.Q = self.create_qtable(TEACHER_Q_PATH)
         self.agent_Q = self.create_qtable(STUDENT_Q_PATH)
-        # self.B = np.zeros([5, 5, 5, 5, 5, 2, 2, 4]) + 1
-        self.B = 1
         self.direction2num = {"West": 0, "East": 1, "North": 2, "South": 3, "Stop": 4}
         self.num2direction = ["West", "East", "North", "South", "Stop"]
-        self.update_rate = 0.1
+        self.update_rate = 0.3
         self.explore_rate = 0.9
         self.count = 0
+        self.look_prob = 1
         self.score_list = []
         self.hundred_mean = []
 
@@ -56,36 +56,55 @@ class ABAgent(Agent):
             self.prev_state = state
             self.prev_action = self.direction2num[random.choice(bestActions)]
             return self.num2direction[self.prev_action]
+        prev_qstate = self.get_qstate(self.prev_state)
+        q_state = self.get_qstate(state)
+        control_prob = random.random()
+        max_action = self.getGreedyAction(q_state,
+                                          [self.direction2num[i] for i in state.getLegalActions() if
+                                           i != 'Stop'])
+
+        if control_prob < self.look_prob:
+            best_action = self.getTeacherGreedyAction(q_state)
+            current_action = self.getUnConsistentAction(best_action)
+            legal = [self.direction2num[i] for i in state.getLegalActions() if i != 'Stop']
+            if current_action not in legal:
+                current_action = self.direction2num[[i for i in state.getLegalActions() if i != 'Stop'][0]]
+        else:
+            current_action = self.getGreedyAction(q_state,
+                                                    [self.direction2num[i] for i in state.getLegalActions() if
+                                                     i != 'Stop'], self.explore_rate)
 
         reward = state.getScore() - self.prev_state.getScore()
-        q_state = self.get_qstate(state)
-        prev_qstate = self.get_qstate(self.prev_state)
-        max_action = self.getGreedyAction(q_state,
-                                          [self.direction2num[i] for i in state.getLegalActions() if i != 'Stop'])
         max_qval = self.get_qval_ref(q_state, self.agent_Q)[max_action]
         prev_qval_ref = self.get_qval_ref(prev_qstate, self.agent_Q)
-        prev_qval_ref[self.prev_action] += self.update_rate * (reward + 0.7 * max_qval - prev_qval_ref[self.prev_action])
-
-        # print(self.get_qval_ref(prev_qstate, self.agent_Q))
+        prev_qval_ref[self.prev_action] += self.update_rate * (reward + 0.9 * max_qval - prev_qval_ref[self.prev_action])
         self.prev_state = state
-        self.prev_action = self.getGreedyAction(q_state,
-                                                [self.direction2num[i] for i in self.prev_state.getLegalActions() if
-                                                 i != 'Stop'], self.explore_rate)
+        self.prev_action = current_action
         return self.num2direction[self.prev_action]
 
+    def getUnConsistentAction(self, best_action, C=0.8):
+        probs = [(1-C)/3]*4
+        probs[best_action] = C
+        return np.random.choice(4, p=probs)
+
+
     def final(self, state):
-        qval = self.get_qval_ref(self.get_qstate(self.prev_state), self.agent_Q)
+        prev_qstate = self.get_qstate(self.prev_state)
+        qval = self.get_qval_ref(prev_qstate, self.agent_Q)
         if state.isWin():
             reward = 500
         else:
             reward = -500
         qval[self.prev_action] += self.update_rate * (reward - qval[self.prev_action])
-        self.explore_rate += 0.1 / 8000
-        if self.B > 0:
-            self.B -= 1. / 8000
-        # print(self.B)
-        if self.explore_rate > 1:
-            self.explore_rate = 1
+
+        if self.explore_rate < 1:
+            self.explore_rate += 0.1 / 20000
+
+        if self.look_prob > 0:
+            self.look_prob -= 1. / 20000
+        else:
+            self.look_prob = 0
+
         # print(self.count, state.getScore())
         self.count += 1
         self.score_list.append(1 if state.isWin() else 0)
@@ -101,10 +120,6 @@ class ABAgent(Agent):
     def getGreedyAction(self, q_state, legal, explore_rate=1):
         # just a copy of original self.Q
         q_value = self.get_qval_ref(q_state, self.agent_Q).copy()
-        best_action = self.getTeacherGreedyAction(q_state)
-        bias = self.action_bias(best_action)
-        # beliefs = self.get_bval_ref(q_state)
-        q_value += self.B * bias
         greedy_action = np.argmax(q_value)
         if greedy_action not in legal:
             greedy_action = legal[0]
@@ -121,27 +136,11 @@ class ABAgent(Agent):
         greedy_action = q_value.argmax()
         return greedy_action
 
-    def action_bias(self, best_action, C=0.8, rh=100):
-        probs = [(1 - C) / 3] * 4
-        probs[best_action] = C
-        unconsist_best_action = np.random.choice(4, p=probs)
-        bias = [-rh] * 4
-        bias[unconsist_best_action] = rh
-        return np.array(bias)
-
     def get_qval_ref(self, q_state, Q):
         q_value = Q
         for i in range(len(q_state)):
             q_value = q_value[q_state[i]]
         return q_value
-
-    '''
-    def get_bval_ref(self, q_state):
-        q_value = self.B
-        for i in range(len(q_state)):
-            q_value = q_value[q_state[i]]
-        return q_value
-    '''
 
     def get_qstate(self, state):
         q_state = [i - 1 for i in state.getPacmanPosition()]

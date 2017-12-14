@@ -7,10 +7,11 @@ import matplotlib.pyplot as plt
 import os
 import pickle
 
-TEACHER_Q_PATH = 'Q.pkl'
-STUDENT_Q_PATH = 'agentQ.pkl'
+TEACHER_Q_PATH = 'NormalQ.pkl'
+STUDENT_Q_PATH = 'agentQRS.pkl'
 
 class RSAgent(Agent):
+
     def __init__(self, evalFn="scoreEvaluation", **args):
         self.evaluationFunction = util.lookup(evalFn, globals())
         assert self.evaluationFunction != None
@@ -21,8 +22,8 @@ class RSAgent(Agent):
         self.B = 1
         self.direction2num = {"West": 0, "East": 1, "North": 2, "South": 3, "Stop": 4}
         self.num2direction = ["West", "East", "North", "South", "Stop"]
-        self.update_rate = 0.3
-        self.explore_rate = 0.8
+        self.update_rate = 0.1
+        self.explore_rate = 0.9
         self.count = 0
         self.score_list = []
         self.hundred_mean = []
@@ -59,13 +60,17 @@ class RSAgent(Agent):
         reward = state.getScore() - self.prev_state.getScore()
         prev_qstate = self.get_qstate(self.prev_state)
         reward += self.B * self.reward_bias(self.prev_action, self.getTeacherGreedyAction(prev_qstate))
+        # print(reward)
         q_state = self.get_qstate(state)
         max_action = self.getGreedyAction(q_state,
                                           [self.direction2num[i] for i in state.getLegalActions() if i != 'Stop'])
         max_qval = self.get_qval_ref(q_state, self.agent_Q)[max_action]
         prev_qval_ref = self.get_qval_ref(prev_qstate, self.agent_Q)
-        prev_qval_ref[self.prev_action] += self.update_rate * (reward + max_qval - prev_qval_ref[self.prev_action])
+        prev_qval_ref[self.prev_action] += self.update_rate * (reward + 0.9 * max_qval - prev_qval_ref[self.prev_action])
         # print(self.get_qval_ref(prev_qstate, self.agent_Q))
+        # print(self.get_qval_ref(prev_qstate, self.Q))
+        # print(self.prev_action)
+        # print('-------------------------------------------')
         self.prev_state = state
         self.prev_action = self.getGreedyAction(q_state,
                                                 [self.direction2num[i] for i in self.prev_state.getLegalActions() if
@@ -81,9 +86,14 @@ class RSAgent(Agent):
             reward = -500
         reward += self.B * self.reward_bias(self.prev_action, self.getTeacherGreedyAction(prev_qstate))
         qval[self.prev_action] += self.update_rate * (reward - qval[self.prev_action])
-        self.explore_rate += 0.2 / 300000
+        self.explore_rate += 0.1 / 30000
+        self.B -= 1. / 30000
+        # print(self.B)
         if self.explore_rate > 1:
             self.explore_rate = 1
+        if self.B < 0:
+            self.B = 0
+
         # print(self.count, state.getScore())
         self.count += 1
         self.score_list.append(1 if state.isWin() else 0)
@@ -91,7 +101,6 @@ class RSAgent(Agent):
             self.hundred_mean.append(np.sum(self.score_list))
             print(self.count / 100, self.hundred_mean[-1])
             self.score_list = []
-            self.B -= 1. / 3000
         if self.count % 5000 == 0:
             plt.plot(list(range(0, len(self.hundred_mean))), self.hundred_mean)
             plt.show()
@@ -130,12 +139,6 @@ class RSAgent(Agent):
 
     def get_qval_ref(self, q_state, Q):
         q_value = Q
-        for i in range(len(q_state)):
-            q_value = q_value[q_state[i]]
-        return q_value
-
-    def get_bval_ref(self, q_state):
-        q_value = self.B
         for i in range(len(q_state)):
             q_value = q_value[q_state[i]]
         return q_value
