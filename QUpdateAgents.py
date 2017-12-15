@@ -8,9 +8,9 @@ import os
 import pickle
 
 TEACHER_Q_PATH = 'NormalQ.pkl'
-STUDENT_Q_PATH = 'agentQCS.pkl'
+STUDENT_Q_PATH = 'agentQQU.pkl'
 
-class CSAgent(Agent):
+class QUAgent(Agent):
 
     def __init__(self, evalFn="scoreEvaluation", **args):
         self.evaluationFunction = util.lookup(evalFn, globals())
@@ -24,7 +24,8 @@ class CSAgent(Agent):
         self.update_rate = 0.3
         self.explore_rate = 0.9
         self.count = 0
-        self.look_prob = 1
+        self.B = 1
+        self.L = 0.1
         self.score_list = []
         self.hundred_mean = []
 
@@ -59,34 +60,33 @@ class CSAgent(Agent):
         prev_qstate = self.get_qstate(self.prev_state)
         q_state = self.get_qstate(state)
         control_prob = random.random()
+        teach = False
+        if random.random() < self.L:
+            teach = True
+
+        reward = state.getScore() - self.prev_state.getScore()
+        qval = self.get_qval_ref(q_state, self.agent_Q)
+        if teach:
+            for x in range(len(qval)):
+                qval[x] += self.B * self.reward_bias(x, self.getTeacherGreedyAction(q_state), 0.8)
+
+        current_action = self.getGreedyAction(q_state,
+                                              [self.direction2num[i] for i in state.getLegalActions() if
+                                               i != 'Stop'], self.explore_rate)
+
         max_action = self.getGreedyAction(q_state,
                                           [self.direction2num[i] for i in state.getLegalActions() if
                                            i != 'Stop'])
 
-        if control_prob < self.look_prob:
-            best_action = self.getTeacherGreedyAction(q_state)
-            current_action = self.getUnConsistentAction(best_action)
-            legal = [self.direction2num[i] for i in state.getLegalActions() if i != 'Stop']
-            if current_action not in legal:
-                current_action = self.direction2num[[i for i in state.getLegalActions() if i != 'Stop'][0]]
-        else:
-            current_action = self.getGreedyAction(q_state,
-                                                    [self.direction2num[i] for i in state.getLegalActions() if
-                                                     i != 'Stop'], self.explore_rate)
+        max_qval = qval[max_action]
 
-        reward = state.getScore() - self.prev_state.getScore()
-        max_qval = self.get_qval_ref(q_state, self.agent_Q)[max_action]
         prev_qval_ref = self.get_qval_ref(prev_qstate, self.agent_Q)
         prev_qval_ref[self.prev_action] += self.update_rate * (reward + 0.9 * max_qval - prev_qval_ref[self.prev_action])
+        if teach:
+            prev_qval_ref[self.prev_action] += self.B * self.reward_bias(self.prev_action, self.getTeacherGreedyAction(prev_qstate), 0.8)
         self.prev_state = state
         self.prev_action = current_action
         return self.num2direction[self.prev_action]
-
-    def getUnConsistentAction(self, best_action, C=0.8):
-        probs = [(1-C)/3]*4
-        probs[best_action] = C
-        return np.random.choice(4, p=probs)
-
 
     def final(self, state):
         prev_qstate = self.get_qstate(self.prev_state)
@@ -98,14 +98,14 @@ class CSAgent(Agent):
         qval[self.prev_action] += self.update_rate * (reward - qval[self.prev_action])
 
         if self.explore_rate < 1:
-            self.explore_rate += 0.1 / 20000
-        else:
+            self.explore_rate += 0.1 / 10000
+        if self.explore_rate > 1:
             self.explore_rate = 1
 
-        if self.look_prob > 0:
-            self.look_prob -= 1. / 20000
+        if self.B > 0:
+            self.B -= 1. / 10000
         else:
-            self.look_prob = 0
+            self.B = 0
 
         # print(self.count, state.getScore())
         self.count += 1
@@ -133,6 +133,19 @@ class CSAgent(Agent):
             prob[greedy_action] = explore_rate
         return np.random.choice(4, p=prob)
 
+    def reward_bias(self, select_action, best_action, C=1, rh=100):
+        if select_action == best_action:
+            if random.random() > C:
+                return -rh
+            else:
+                return rh
+        else:
+            if random.random() > C:
+                return rh
+            else:
+                return -rh
+
+
     def getTeacherGreedyAction(self, q_state):
         q_value = self.get_qval_ref(q_state, self.Q)
         greedy_action = q_value.argmax()
@@ -155,4 +168,3 @@ class CSAgent(Agent):
 
 def scoreEvaluation(state):
     return state.getScore()
-
